@@ -1,158 +1,203 @@
-# Quantum-Assisted Pattern Matching
+<div align="center">
 
-A hybrid classical-quantum image pattern matching system that combines **CLIP** vision embeddings, **YOLOv8** object detection, and **Grover's quantum search algorithm** to locate a target pattern within a scene image.
+# ⚛️ Quantum-Assisted Pattern Matching
 
-![Python](https://img.shields.io/badge/Python-3.9+-blue?logo=python)
-![FastAPI](https://img.shields.io/badge/FastAPI-Backend-009688?logo=fastapi)
-![Qiskit](https://img.shields.io/badge/Qiskit-Quantum-6929C4?logo=ibm)
-![CLIP](https://img.shields.io/badge/OpenAI-CLIP-412991)
-![YOLOv8](https://img.shields.io/badge/Ultralytics-YOLOv8-00FFFF)
+### _Where Classical Vision Meets Quantum Computing_
+
+A hybrid classical-quantum image pattern matching system that fuses **CLIP** vision embeddings, **YOLOv8** object detection, and **Grover's quantum search algorithm** to locate target patterns within scene images — with quantum-level confidence.
+
+<br/>
+
+[![Python](https://img.shields.io/badge/Python-3.9+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![Qiskit](https://img.shields.io/badge/Qiskit-6929C4?style=for-the-badge&logo=ibm&logoColor=white)](https://qiskit.org)
+[![CLIP](https://img.shields.io/badge/OpenAI_CLIP-412991?style=for-the-badge&logo=openai&logoColor=white)](https://openai.com/research/clip)
+[![YOLOv8](https://img.shields.io/badge/YOLOv8-00FFFF?style=for-the-badge&logo=ultralytics&logoColor=black)](https://ultralytics.com)
+[![PyTorch](https://img.shields.io/badge/PyTorch-EE4C2C?style=for-the-badge&logo=pytorch&logoColor=white)](https://pytorch.org)
+[![OpenCV](https://img.shields.io/badge/OpenCV-5C3EE8?style=for-the-badge&logo=opencv&logoColor=white)](https://opencv.org)
+
+</div>
 
 ---
 
-## Overview
+## 🔍 Overview
 
-The system takes two inputs — a **scene image** and a **target pattern** — and identifies where the target appears within the scene. It uses a multi-stage pipeline:
+Upload a **scene image** and a **target pattern** — the system pinpoints where the target appears using a five-stage pipeline:
 
-1. **Detection** — Segments the scene into candidate regions using YOLO object detection, contour-based grid tile detection, or uniform grid splitting
-2. **Feature Extraction** — Extracts CLIP vision embeddings from each candidate region and the target
-3. **Similarity Scoring** — Computes AE-QIP (cosine-based quantum-inspired probability), edge structure, and color histogram similarities
-4. **Quantum Amplification** — Runs Grover's search algorithm on a quantum simulator to amplify the best classical match
-5. **Result Composition** — Generates annotated output images, charts, and detailed diagnostics
+> **Detect → Extract → Score → Amplify → Visualize**
 
-## Architecture
+| Stage | What Happens |
+|:---:|---|
+| 🎯 **Detection** | Segments the scene into candidate regions via YOLO, contour-based grid tiles, or uniform grid splitting |
+| 🧠 **Feature Extraction** | Generates CLIP (ViT-B/32) vision embeddings for each candidate and the target |
+| 📊 **Similarity Scoring** | Computes AE-QIP cosine probability, edge structure, and color histogram similarities |
+| ⚛️ **Quantum Amplification** | Runs Grover's search on a quantum simulator to amplify the best classical match |
+| 🖼️ **Result Composition** | Produces annotated output images, interactive charts, and detailed diagnostics |
 
-```
-┌─────────────┐    ┌──────────────┐    ┌───────────────┐    ┌──────────────┐
-│  Scene +    │───▶│  Detection   │───▶│  CLIP Feature │───▶│  Similarity  │
-│  Target     │    │  (YOLO/Grid) │    │  Extraction   │    │  Scoring     │
-└─────────────┘    └──────────────┘    └───────────────┘    └──────┬───────┘
-                                                                   │
-                   ┌──────────────┐    ┌───────────────┐           │
-                   │   Results    │◀───│   Grover's    │◀──────────┘
-                   │   & Charts   │    │   Search      │
-                   └──────────────┘    └───────────────┘
-```
+---
 
-## Project Structure
+## 🏗️ Architecture
 
 ```
-├── server.py          # FastAPI backend — API endpoints & analysis pipeline
-├── app.py             # Streamlit alternative frontend
-├── models.py          # CLIP & YOLO model loading (cached)
-├── features.py        # CLIP feature vector extraction
-├── similarity.py      # AE-QIP, edge, and color similarity metrics
-├── detection.py       # Scene segmentation (YOLO, grid tiles, uniform split)
-├── quantum.py         # Grover's algorithm (oracle, diffuser, simulator)
+┌─────────────┐     ┌──────────────┐     ┌───────────────┐     ┌──────────────┐
+│  Scene  +   │────▶│  Detection   │────▶│  CLIP Feature │────▶│  Similarity  │
+│  Target     │     │  (YOLO/Grid) │     │  Extraction   │     │  Scoring     │
+└─────────────┘     └──────────────┘     └───────────────┘     └──────┬───────┘
+                                                                      │
+                    ┌──────────────┐     ┌───────────────┐            │
+                    │  Results  &  │◀────│   Grover's    │◀───────────┘
+                    │  Charts      │     │   Search      │
+                    └──────────────┘     └───────────────┘
+```
+
+---
+
+## 📁 Project Structure
+
+```
+Quantum-Assisted-Pattern-Matching/
+│
+├── server.py              # FastAPI backend — API endpoints & analysis pipeline
+├── app.py                 # Streamlit alternative frontend
+├── main.py                # Legacy monolithic version
+├── requirements.txt       # Python dependencies
+│
+├── models.py              # CLIP & YOLO model loading (cached)
+├── features.py            # CLIP feature vector extraction
+├── similarity.py          # AE-QIP, edge, and color similarity metrics
+├── detection.py           # Scene segmentation (YOLO, grid tiles, uniform split)
+├── quantum.py             # Grover's algorithm (oracle, diffuser, simulator)
+│
 ├── static/
-│   └── index.html     # Web UI (dark theme, glassmorphism)
-├── .streamlit/
-│   └── config.toml    # Streamlit configuration
-├── main.py            # Legacy monolithic version
-└── .gitignore
+│   ├── index.html         # Web UI shell
+│   ├── css/
+│   │   └── styles.css     # Dark theme, glassmorphism, animations
+│   └── js/
+│       └── app.js         # Client-side interactivity & rendering
+│
+└── yolov8n.pt             # YOLOv8 weights (auto-downloaded)
 ```
 
-## Setup
+---
+
+## 🚀 Getting Started
 
 ### Prerequisites
 
-- Python 3.9+
-- CUDA-capable GPU (optional, falls back to CPU)
+- **Python 3.9+**
+- **CUDA-capable GPU** _(optional — falls back to CPU)_
 
 ### Installation
 
 ```bash
+# Clone the repository
 git clone https://github.com/Aditya-Dosapati/Quantum-Assisted-Pattern-Matching.git
 cd Quantum-Assisted-Pattern-Matching
+
+# Create & activate virtual environment
 python -m venv .venv
-.venv\Scripts\activate        # Windows
-# source .venv/bin/activate   # Linux/macOS
+.venv\Scripts\activate          # Windows
+# source .venv/bin/activate     # Linux / macOS
+
+# Install PyTorch (with CUDA support)
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
-pip install ultralytics transformers qiskit qiskit-aer
-pip install opencv-python numpy Pillow matplotlib
-pip install fastapi uvicorn python-multipart streamlit
+
+# Install all other dependencies
+pip install -r requirements.txt
 ```
 
-### YOLOv8 Weights
+> 💡 **YOLOv8 Weights** — The system looks for `yolov8m.pt` or `yolov8n.pt` in the project directory. They are auto-downloaded on first run, or grab them from [Ultralytics](https://docs.ultralytics.com/models/yolov8/).
 
-The system looks for YOLOv8 weights (`yolov8m.pt` or `yolov8n.pt`) in the project directory and common paths. You can download them from [Ultralytics](https://docs.ultralytics.com/models/yolov8/).
-
-## Usage
-
-### FastAPI Web App (Recommended)
+### Run the App
 
 ```bash
 python server.py
 ```
 
-Open **http://localhost:8000** in your browser. Upload a scene image and a target pattern, then click **Analyze with Quantum**.
+Open **http://localhost:8000** — upload a scene and target image, then hit **Analyze with Quantum**.
 
-### Streamlit App
+<details>
+<summary>📱 Alternative: Streamlit UI</summary>
 
 ```bash
 streamlit run app.py
 ```
 
-## How It Works
+</details>
+
+---
+
+## ⚙️ How It Works
 
 ### Detection Strategies
 
-The system automatically selects the best detection strategy:
+The system auto-selects the best segmentation strategy:
 
 | Strategy | Method | When Used |
-|----------|--------|-----------|
-| **Grid Tiles** | Adaptive thresholding + contour detection | Mosaic/grid-structured scenes |
-| **YOLO** | YOLOv8 object detection | Object-rich scenes |
-| **Uniform Grid** | Fixed 4×4 grid split | Fallback when others yield < 4 regions |
+|:---|:---|:---|
+| 🔲 **Grid Tiles** | Adaptive thresholding + contour detection | Mosaic / grid-structured scenes |
+| 🎯 **YOLO** | YOLOv8 object detection | Object-rich natural scenes |
+| 📐 **Uniform Grid** | Fixed 4×4 grid split | Fallback when others yield < 4 regions |
 
 ### Similarity Metrics
 
-- **AE-QIP Similarity** — Cosine similarity mapped to quantum-inspired probability: $(1 + \cos\theta) / 2$
-- **Edge Structure** — Canny edge detection + cosine similarity of edge maps
-- **Color Histogram** — HSV histogram comparison using OpenCV correlation
+| Metric | Description |
+|:---|:---|
+| 🧠 **AE-QIP Similarity** | Cosine similarity → quantum-inspired probability: $(1 + \cos\theta) / 2$ |
+| 📐 **Edge Structure** | Canny edge detection + cosine similarity of edge maps |
+| 🎨 **Color Histogram** | HSV histogram comparison via OpenCV correlation |
 
 ### Confidence Score
 
 $$\text{Confidence} = 0.50 \times \text{CLIP} + 0.25 \times \text{Edge} + 0.25 \times \text{Color}$$
 
-### Grover's Search
+### Grover's Quantum Search
 
-The quantum module implements Grover's algorithm with:
-- Phase-flip oracle marking the classically-identified best match
-- Diffusion operator (inversion about the mean)
-- Optimal iterations: $\lfloor \frac{\pi}{4}\sqrt{2^n} \rfloor$
-- Execution on Qiskit Aer `qasm_simulator` (1024 shots)
+The quantum module implements Grover's algorithm:
+
+- **Oracle** — Phase-flip marking the classically-identified best match
+- **Diffuser** — Inversion about the mean (amplitude amplification)
+- **Iterations** — Optimal count: $\lfloor \frac{\pi}{4}\sqrt{2^n} \rfloor$
+- **Execution** — Qiskit Aer `qasm_simulator` with 1024 shots
 
 ### Pattern-Absence Detection
 
-The system detects when a target pattern is **not present** in the scene using:
-- Noise floor analysis
-- Cross-similarity comparison
-- Baseline gap measurement
-- Z-score statistical separation
+The system identifies when a target is **not present** using:
+- 📉 Noise floor analysis
+- 🔀 Cross-similarity comparison
+- 📏 Baseline gap measurement
+- 📊 Z-score statistical separation
 
-## API
+---
+
+## 🔌 API Reference
 
 ### `POST /api/analyze`
 
 Upload scene and target images as multipart form data.
 
-**Response** includes: matched indices, similarity scores, confidence, detection method, base64-encoded output image, candidate thumbnails, charts (Grover histogram, similarity bars), timing breakdown, quantum circuit diagram, and diagnostics.
+**Returns:** matched indices, similarity scores, confidence, detection method, base64-encoded output image, candidate thumbnails, Grover histogram chart, similarity bar chart, quantum circuit diagram, timing breakdown, and full diagnostics.
 
 ### `GET /api/device`
 
-Returns the compute device info (CUDA/CPU).
+Returns the active compute device (`cuda` or `cpu`).
 
-## Tech Stack
+---
 
-| Component | Technology |
-|-----------|-----------|
-| Vision Embeddings | OpenAI CLIP (ViT-B/32) |
-| Object Detection | Ultralytics YOLOv8 |
-| Quantum Search | Qiskit + Aer Simulator |
-| Image Processing | OpenCV, Pillow |
-| Backend | FastAPI + Uvicorn |
-| Frontend | Vanilla HTML/CSS/JS |
-| Alternative UI | Streamlit |
-| Computation | PyTorch, NumPy |
-| Visualization | Matplotlib |
+## 🛠️ Tech Stack
+
+<div align="center">
+
+| Layer | Technology |
+|:---:|:---|
+| 🧠 Vision Embeddings | OpenAI CLIP (ViT-B/32) |
+| 🎯 Object Detection | Ultralytics YOLOv8 |
+| ⚛️ Quantum Search | Qiskit + Aer Simulator |
+| 🖼️ Image Processing | OpenCV · Pillow |
+| ⚡ Backend | FastAPI + Uvicorn |
+| 🎨 Frontend | HTML · CSS · JavaScript |
+| 📱 Alt UI | Streamlit |
+| 🔢 Computation | PyTorch · NumPy · SciPy |
+| 📊 Visualization | Matplotlib |
+
+</div>
