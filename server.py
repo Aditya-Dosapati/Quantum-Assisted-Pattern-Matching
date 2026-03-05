@@ -276,8 +276,27 @@ async def analyze(
         ax_qc.set_title("Grover's Circuit", fontsize=12, fontweight='bold', pad=10)
         circuit_b64 = _fig_to_b64(fig_qc)
         plt.close(fig_qc)
-    except Exception:
-        circuit_b64 = None
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        print(f"[WARN] Circuit drawing failed: {exc}")
+        # Fallback: render text-based circuit as an image
+        try:
+            circuit_text = qc.draw('text').single_string() if hasattr(qc.draw('text'), 'single_string') else str(qc.draw('text'))
+            fig_fb, ax_fb = plt.subplots(figsize=(max(10, n_qubits * 2.5), max(4, n_qubits * 1.2)))
+            ax_fb.axis('off')
+            ax_fb.text(0.02, 0.95, circuit_text, transform=ax_fb.transAxes,
+                       fontsize=9, fontfamily='monospace', verticalalignment='top',
+                       color='white',
+                       bbox=dict(boxstyle='round,pad=0.8', facecolor='#1e1b4b', edgecolor='#6366f1', alpha=0.95))
+            ax_fb.set_facecolor('#0a0e27')
+            fig_fb.patch.set_facecolor('#0a0e27')
+            ax_fb.set_title("Grover's Circuit (text)", fontsize=12, fontweight='bold', pad=10, color='white')
+            circuit_b64 = _fig_to_b64(fig_fb)
+            plt.close(fig_fb)
+        except Exception as exc2:
+            print(f"[WARN] Circuit text fallback also failed: {exc2}")
+            circuit_b64 = None
 
     # --- Build candidate thumbnails (top 8) ---
     ranked_indices = sorted(range(len(similarity_scores)), key=lambda i: similarity_scores[i], reverse=True)
