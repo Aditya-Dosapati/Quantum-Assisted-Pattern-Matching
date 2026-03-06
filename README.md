@@ -39,15 +39,15 @@ Upload a **scene image** and a **target pattern** — the system pinpoints where
 ## 🏗️ Architecture
 
 ```
-┌─────────────┐     ┌──────────────┐     ┌───────────────┐     ┌──────────────┐
-│  Scene  +   │────▶│  Detection   │────▶│  CLIP Feature │────▶│  Similarity  │
-│  Target     │     │  (YOLO/Grid) │     │  Extraction   │     │  Scoring     │
-└─────────────┘     └──────────────┘     └───────────────┘     └──────┬───────┘
-                                                                      │
-                    ┌──────────────┐     ┌───────────────┐            │
-                    │  Results  &  │◀────│   Grover's    │◀───────────┘
-                    │  Charts      │     │   Search      │
-                    └──────────────┘     └───────────────┘
+┌─────────────┐      ┌──────────────┐     ┌───────────────┐      ┌──────────────┐
+│  Scene  +   │────▶│  Detection    │────▶│ CLIP Feature │────▶│  Similarity  │
+│  Target     │      │  (YOLO/Grid) │     │  Extraction   │      │  Scoring     │
+└─────────────┘      └──────────────┘     └───────────────┘      └──────┬───────┘
+                                                                        │
+                    ┌──────────────┐       ┌───────────────┐            │
+                    │  Results  &  │◀──── │    Grover's    │◀──────────┘
+                    │  Charts      │       │   Search      │
+                    └──────────────┘       └───────────────┘
 ```
 
 ---
