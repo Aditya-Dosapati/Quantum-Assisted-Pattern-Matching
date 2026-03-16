@@ -40,12 +40,14 @@ Upload a **scene image** and a **target pattern** — the system pinpoints where
 
 ```
 ┌─────────────┐        ┌──────────────┐        ┌───────────────┐      
-│  Scene  +   │───────>│  Detection   │───────>│  CLIP Feature │
+│  Scene  +   │────>───│  Detection   │────>───│  CLIP Feature │
 │  Target     │        │  (YOLO/Grid) │        │  Extraction   │      
 └─────────────┘        └──────────────┘        └───────┬───────┘      
-                                                       |                  
+                                                       |
+                                                       V 
+                                                       |
 ┌──────────────┐       ┌──────────────┐        ┌───────┴──────┐       
-│  Results  &  |<──────│    Grover's  |<───────│  Similarity  │
+│  Results  &  |───<───│    Grover's  |────<───│  Similarity  │
 │  Charts      │       │   Search     │        │  Scoring     │
 └──────────────┘       └──────────────┘        └──────────────┘
 ```
