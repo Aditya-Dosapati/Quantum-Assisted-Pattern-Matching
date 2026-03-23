@@ -16,27 +16,9 @@ window.addEventListener('scroll', function() {
   if (window.scrollY > 400) btn.classList.add('visible');
   else btn.classList.remove('visible');
 });
-$('#backToTop').addEventListener('click', function() {
-  window.scrollTo({ top: 0, behavior: 'smooth' });
-});
 
-/* ── Section Navigation ───────────────────────── */
-document.querySelectorAll('.nav-btn').forEach(function(btn) {
-  btn.addEventListener('click', function() {
-    var targetId = this.getAttribute('data-target');
-    var targetEl = document.getElementById(targetId);
-    if (targetEl) {
-      targetEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      // Update active state
-      document.querySelectorAll('.nav-btn').forEach(function(b) { b.classList.remove('active'); });
-      this.classList.add('active');
-    }
-  });
-});
-
-// Scroll spy for section navigation
 window.addEventListener('scroll', function() {
-  var sections = ['resultBanner', 'navMetrics', 'navDetection', 'navCandidates', 'navCharts', 'navTiming', 'navQuantum'];
+  var sections = ['resultBanner', 'navMetrics', 'navDetection', 'navCandidates', 'navCharts', 'navTiming', 'navCompare', 'navQuantum'];
   var current = '';
   sections.forEach(function(id) {
     var el = document.getElementById(id);
@@ -48,6 +30,76 @@ window.addEventListener('scroll', function() {
   document.querySelectorAll('.nav-btn').forEach(function(btn) {
     btn.classList.remove('active');
     if (btn.getAttribute('data-target') === current) btn.classList.add('active');
+  });
+});
+
+$('#backToTop')?.addEventListener('click', function() {
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+});
+
+/* ── Interactive How-It-Works Cards ─────────── */
+function initInteractiveSteps() {
+  var cards = Array.from(document.querySelectorAll('.step-card'));
+  var inspectorTitle = $('#stepInspectorTitle');
+  var inspectorText = $('#stepInspectorText');
+  var inspectorTech = $('#stepInspectorTech');
+  if (!cards.length) return;
+
+  function activateCard(card) {
+    cards.forEach(function(c) {
+      c.classList.remove('active');
+      c.setAttribute('aria-pressed', 'false');
+    });
+    card.classList.add('active');
+    card.setAttribute('aria-pressed', 'true');
+    if (inspectorTitle) inspectorTitle.textContent = card.getAttribute('data-step-title') || 'Step';
+    if (inspectorText) inspectorText.textContent = card.getAttribute('data-step-detail') || '';
+    if (inspectorTech) inspectorTech.textContent = card.getAttribute('data-step-tech') || 'Pipeline';
+  }
+
+  cards.forEach(function(card, idx) {
+    card.addEventListener('click', function() { activateCard(card); });
+    card.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        activateCard(card);
+      }
+    });
+
+    card.addEventListener('pointermove', function(e) {
+      var rect = card.getBoundingClientRect();
+      var px = (e.clientX - rect.left) / rect.width;
+      var py = (e.clientY - rect.top) / rect.height;
+      var rx = (0.5 - py) * 7;
+      var ry = (px - 0.5) * 9;
+      card.style.setProperty('--mx', (px * 100).toFixed(2) + '%');
+      card.style.setProperty('--my', (py * 100).toFixed(2) + '%');
+      card.style.setProperty('--rx', rx.toFixed(2) + 'deg');
+      card.style.setProperty('--ry', ry.toFixed(2) + 'deg');
+    });
+
+    card.addEventListener('pointerleave', function() {
+      card.style.setProperty('--mx', '50%');
+      card.style.setProperty('--my', '50%');
+      card.style.setProperty('--rx', '0deg');
+      card.style.setProperty('--ry', '0deg');
+    });
+
+    if (idx === 0) activateCard(card);
+  });
+}
+initInteractiveSteps();
+
+/* ── Section Navigation Click Handler ─────────── */
+document.querySelectorAll('.nav-btn').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    var targetId = this.getAttribute('data-target');
+    var targetEl = document.getElementById(targetId);
+    if (targetEl) {
+      targetEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      document.querySelectorAll('.nav-btn').forEach(function(b) { b.classList.remove('active'); });
+      this.classList.add('active');
+    }
   });
 });
 
@@ -117,6 +169,7 @@ $('#analyzeBtn').addEventListener('click', async () => {
   const btn = $('#analyzeBtn');
   btn.disabled = true; btn.classList.add('loading'); btn.textContent = 'Analyzing\u2026';
   hide('#errorCard'); hide('#resultsSection');
+  $('#resultsSection').classList.remove('visible');
   startLoadingSteps();
 
   const form = new FormData();
@@ -245,24 +298,39 @@ function renderResults(data) {
 
   // Output
   $('#outputImg').src = data.output_image;
-  $('#outputCaption').textContent = data.n_matches + ' match(es) found \u00B7 Detection: ' + data.detection_method;
+  var bestLabel = data.best_label ? data.best_label : (data.target_object_label ? data.target_object_label : 'object');
+  $('#outputCaption').textContent = data.n_matches + ' match(es) found \u00B7 Label: ' + bestLabel + ' \u00B7 Detection: ' + data.detection_method;
 
   // Thumbnails
   var th = '';
   for (var i = 0; i < data.candidate_thumbs.length; i++) {
     var t = data.candidate_thumbs[i];
     var m = data.matched_indices.indexOf(t.index) !== -1;
+    var labelText = t.label ? t.label : (data.target_object_label ? data.target_object_label : 'object');
     th += '<div class="thumb-card ' + (m ? 'match' : '') + '">' +
       '<img src="' + t.image + '" alt="C' + t.index + '" />' +
       '<div class="thumb-info"><div class="thumb-rank">#' + t.rank + '</div>' +
-      '<div class="thumb-score">' + (t.score * 100).toFixed(1) + '%</div></div></div>';
+      '<div class="thumb-score">' + (t.score * 100).toFixed(1) + '%</div>' +
+      '<div class="thumb-score" style="font-size:.72rem;opacity:.85;text-transform:capitalize">' + labelText + '</div></div></div>';
   }
   $('#thumbsRow').innerHTML = th;
 
-  // Charts
-  $('#chartsGrid').innerHTML =
-    '<div class="chart-card"><h4>Grover Measurement Distribution</h4><img src="' + data.chart_grover + '" alt="Grover" /></div>' +
-    '<div class="chart-card"><h4>CLIP Similarity Scores</h4><img src="' + data.chart_similarity + '" alt="Similarity" /></div>';
+  // Charts: show section only when chart images are provided by backend.
+  var chartsTitle = $('#navCharts');
+  var chartsNavBtn = document.querySelector('.nav-btn[data-target="navCharts"]');
+  if (data.chart_grover && data.chart_similarity) {
+    if (chartsTitle) chartsTitle.style.display = '';
+    if (chartsNavBtn) chartsNavBtn.style.display = '';
+    $('#chartsGrid').style.display = '';
+    $('#chartsGrid').innerHTML =
+      '<div class="chart-card"><h4>Grover Measurement Distribution</h4><img src="' + data.chart_grover + '" alt="Grover" /></div>' +
+      '<div class="chart-card"><h4>CLIP Similarity Scores</h4><img src="' + data.chart_similarity + '" alt="Similarity" /></div>';
+  } else {
+    if (chartsTitle) chartsTitle.style.display = 'none';
+    if (chartsNavBtn) chartsNavBtn.style.display = 'none';
+    $('#chartsGrid').innerHTML = '';
+    $('#chartsGrid').style.display = 'none';
+  }
 
   // Timing
   if (data.timing) {
@@ -274,6 +342,73 @@ function renderResults(data) {
       '<div class="timing-card"><div class="timing-val">' + fmt(ti.quantum_ms) + '</div><div class="timing-label">Quantum</div></div>' +
       '<div class="timing-card"><div class="timing-val">' + fmt(ti.total_ms) + '</div><div class="timing-label">Total</div></div>';
   }
+
+  // YOLO vs Grover Comparison
+  var comparisonHtml = '';
+  var cmp = data.comparison || null;
+  var classicalSearchMs = cmp && cmp.classical_search_time_ms !== undefined
+    ? cmp.classical_search_time_ms
+    : (cmp && cmp.estimated_classical_search_ms !== undefined ? cmp.estimated_classical_search_ms : (data.timing ? data.timing.similarity_ms : null));
+  var quantumSearchMs = cmp && cmp.quantum_search_time_ms !== undefined
+    ? cmp.quantum_search_time_ms
+    : (cmp && cmp.measured_grover_search_ms !== undefined ? cmp.measured_grover_search_ms : (data.timing ? data.timing.quantum_ms : null));
+  var winner = cmp && cmp.search_winner
+    ? cmp.search_winner
+    : (classicalSearchMs !== null && quantumSearchMs !== null && quantumSearchMs <= classicalSearchMs ? 'Grover' : 'Classical');
+  var winnerClass = winner === 'Grover' ? 'grover' : 'yolo';
+  var fasterTag = '<span class="compare-pill grover">Grover shows quadratic speedup in search phase</span>';
+  var measuredGapMs = cmp && cmp.measured_gap_ms !== undefined
+    ? cmp.measured_gap_ms
+    : (classicalSearchMs !== null && quantumSearchMs !== null ? Math.abs(classicalSearchMs - quantumSearchMs) : 0);
+  var measuredRatioRaw = cmp && cmp.measured_speedup_ratio_classical_over_grover !== undefined
+    ? cmp.measured_speedup_ratio_classical_over_grover
+    : (cmp && cmp.measured_speedup_ratio_yolo_over_grover !== undefined
+      ? cmp.measured_speedup_ratio_yolo_over_grover
+      : (quantumSearchMs && quantumSearchMs > 0 && classicalSearchMs !== null ? (classicalSearchMs / quantumSearchMs) : null));
+  var measuredRatio = measuredRatioRaw === null || measuredRatioRaw === undefined
+    ? 'N/A'
+    : Number(measuredRatioRaw).toFixed(3);
+  var measuredGapText = Math.round(measuredGapMs) + 'ms';
+  var classicalSearchTimeText = classicalSearchMs !== null ? fmt(classicalSearchMs) : 'N/A';
+  var quantumSearchTimeText = quantumSearchMs !== null ? fmt(quantumSearchMs) : 'N/A';
+  var runCandidates = (data.quantum_info && data.quantum_info.n_candidates !== undefined)
+    ? data.quantum_info.n_candidates
+    : (data.n_candidates !== undefined ? data.n_candidates : null);
+  var classicalSteps = (cmp && cmp.classical_steps !== undefined)
+    ? cmp.classical_steps
+    : (runCandidates !== null ? runCandidates : 0);
+  var groverSteps = (data.quantum_info && data.quantum_info.iterations !== undefined)
+    ? data.quantum_info.iterations
+    : (data.grover_iterations !== undefined
+      ? data.grover_iterations
+      : (cmp && cmp.grover_iterations !== undefined
+        ? cmp.grover_iterations
+        : (cmp && cmp.grover_steps !== undefined ? cmp.grover_steps : 0)));
+  var speedupMsg = 'Grover shows quadratic speedup in search phase';
+
+  comparisonHtml +=
+    '<div class="compare-header">' +
+      '<span class="compare-pill grover">' + speedupMsg + '</span>' +
+      '<p class="compare-note">Measured Gap: ' + measuredGapText + ' | Speedup (Classical/Grover): ' + measuredRatio + 'x</p>' +
+    '</div>' +
+    '<table class="compare-table">' +
+      '<thead><tr><th>ASPECT</th><th>Classical Search</th><th>Grover</th></tr></thead>' +
+      '<tbody>' +
+        '<tr><td>Primary Goal</td><td>Feature matching in search space</td><td>Feature matching using quantum amplitude amplification</td></tr>' +
+        '<tr><td>Time Complexity</td><td>O(N)</td><td>O(sqrt(N))</td></tr>' +
+        '<tr><td>Search Type</td><td>Sequential / Linear search</td><td>Quantum search</td></tr>' +
+        '<tr><td>Iterations (Steps)</td><td>' + classicalSteps + '</td><td>' + groverSteps + '</td></tr>' +
+        '<tr><td>Search time</td><td>' + classicalSearchTimeText + '</td><td>' + quantumSearchTimeText + '</td></tr>' +
+        '<tr><td>Pipeline Role</td><td>Post-detection matching</td><td>Accelerated matching</td></tr>' +
+        '<tr><td>Scalability</td><td>Slower for large datasets</td><td>Faster for large datasets</td></tr>' +
+        '<tr><td>Efficiency</td><td>Low for large N</td><td>High due to quadratic speedup</td></tr>' +
+        '<tr><td>Hardware</td><td>Classical computers</td><td>Quantum / Quantum simulator</td></tr>' +
+        '<tr><td>Accuracy</td><td>Deterministic</td><td>Probabilistic (high success rate)</td></tr>' +
+        '<tr><td>Use Case</td><td>Small-scale search</td><td>Large-scale pattern matching</td></tr>' +
+        '<tr><td>Estimated Time</td><td>Higher</td><td>Lower</td></tr>' +
+      '</tbody>' +
+    '</table>';
+  $('#compareSection').innerHTML = comparisonHtml;
 
   // Image Info
   if (data.image_info) {
@@ -321,14 +456,15 @@ function renderResults(data) {
 
   // Quantum Info Badges
   var qi = data.quantum_info;
-  $('#quantumInfo').innerHTML = '<div class="quantum-info">' +
-    '<div class="quantum-badge"><div class="quantum-value">' + qi.n_candidates + '</div><div class="quantum-label">Candidates</div></div>' +
-    '<div class="quantum-badge"><div class="quantum-value">' + qi.n_qubits + '</div><div class="quantum-label">Qubits</div></div>' +
-    '<div class="quantum-badge"><div class="quantum-value">' + qi.state_space + '</div><div class="quantum-label">State Space</div></div>' +
-    '<div class="quantum-badge"><div class="quantum-value" style="font-size:1rem">|' + qi.marked_state + '\u27E9</div><div class="quantum-label">Marked State</div></div>' +
-    '<div class="quantum-badge"><div class="quantum-value">' + qi.iterations + '</div><div class="quantum-label">Iterations</div></div>' +
-    '<div class="quantum-badge"><div class="quantum-value">' + qi.shots + '</div><div class="quantum-label">Shots</div></div>' +
-  '</div>';
+  $('#quantumInfo').innerHTML =
+    '<div class="quantum-info">' +
+      '<div class="quantum-badge"><div class="quantum-value">' + qi.n_candidates + '</div><div class="quantum-label">Candidates</div></div>' +
+      '<div class="quantum-badge"><div class="quantum-value">' + qi.n_qubits + '</div><div class="quantum-label">Qubits</div></div>' +
+      '<div class="quantum-badge"><div class="quantum-value">' + qi.state_space + '</div><div class="quantum-label">State Space</div></div>' +
+      '<div class="quantum-badge"><div class="quantum-value" style="font-size:1rem">|' + qi.marked_state + '\u27E9</div><div class="quantum-label">Marked State</div></div>' +
+      '<div class="quantum-badge"><div class="quantum-value">' + qi.iterations + '</div><div class="quantum-label">Iterations</div></div>' +
+      '<div class="quantum-badge"><div class="quantum-value">' + qi.shots + '</div><div class="quantum-label">Shots</div></div>' +
+    '</div>';
 
   // Accordions
   var diag = data.diagnostics;
@@ -369,8 +505,32 @@ function renderResults(data) {
       '</div></div>' +
     '</div>';
 
+  // Staggered reveal for key result blocks.
+  var revealTargets = [];
+  if ($('#resultBanner')) revealTargets.push($('#resultBanner'));
+  document.querySelectorAll('#statsGrid .stat-card').forEach(function(el) { revealTargets.push(el); });
+  document.querySelectorAll('#confidenceSection .confidence-wrap').forEach(function(el) { revealTargets.push(el); });
+  document.querySelectorAll('#gaugesGrid .gauge-card').forEach(function(el) { revealTargets.push(el); });
+  if (document.querySelector('.output-wrap')) revealTargets.push(document.querySelector('.output-wrap'));
+  if ($('#thumbsRow')) revealTargets.push($('#thumbsRow'));
+  if ($('#chartsGrid')) revealTargets.push($('#chartsGrid'));
+  if ($('#timingGrid')) revealTargets.push($('#timingGrid'));
+  if ($('#compareSection')) revealTargets.push($('#compareSection'));
+
+  for (var i = 0; i < revealTargets.length; i++) {
+    var node = revealTargets[i];
+    node.classList.remove('reveal-active');
+    node.classList.add('reveal-item');
+    node.style.setProperty('--reveal-delay', (i * 110) + 'ms');
+  }
+
   show('#resultsSection');
   $('#resultsSection').classList.add('visible');
+  requestAnimationFrame(function() {
+    for (var i = 0; i < revealTargets.length; i++) {
+      revealTargets[i].classList.add('reveal-active');
+    }
+  });
   $('#resultsSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
   
   // Show section navigation
