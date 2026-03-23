@@ -53,7 +53,8 @@ def run_grover_search(n_candidates, best_classical, shots=1024):
 
     qc = QuantumCircuit(n_qubits)
     qc.h(range(n_qubits))
-    iterations = max(1, int(np.floor((np.pi / 4) * np.sqrt(2 ** n_qubits))))
+    # Use actual candidate count so iterations reflect each run's search space.
+    iterations = max(1, int(np.floor((np.pi / 4) * np.sqrt(n_candidates))))
     for _ in range(iterations):
         grover_oracle(qc, marked_state)
         diffuser(qc, n_qubits)
