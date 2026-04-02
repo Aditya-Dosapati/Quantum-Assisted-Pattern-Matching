@@ -1,6 +1,6 @@
 <div align="center">
 
-# ⚛️ Quantum-Assisted Pattern Matching
+# ⚛️ Quantum-Accelerated Pattern Matching
 
 ### _Where Classical Vision Meets Quantum Computing_
 
