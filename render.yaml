@@ -11,6 +11,6 @@ services:
       - key: PYTHON_VERSION
         value: 3.11.9
       - key: YOLO_MODEL
-        value: yolov8m.pt
+        value: yolov8n.pt
       - key: LIGHTWEIGHT_MODE
-        value: "false"
+        value: "true"

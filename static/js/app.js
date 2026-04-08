@@ -279,7 +279,12 @@ $('#analyzeBtn').addEventListener('click', async () => {
   form.append('target', targetFile);
 
   try {
-    const res = await fetch('/api/analyze', { method: 'POST', body: form });
+    var res = await fetch('/api/analyze', { method: 'POST', body: form });
+    if (res.status === 502 || res.status === 503) {
+      $('#loadingText').textContent = 'Backend is waking up, retrying...';
+      await new Promise(function(resolve) { setTimeout(resolve, 2500); });
+      res = await fetch('/api/analyze', { method: 'POST', body: form });
+    }
     const raw = await res.text();
     let data = null;
     if (raw) {
