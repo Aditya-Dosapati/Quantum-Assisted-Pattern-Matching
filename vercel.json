@@ -1,21 +1,21 @@
 {
   "version": 2,
-  "builds": [
-    {
-      "src": "server.py",
-      "use": "@vercel/python"
-    }
-  ],
   "routes": [
     {
+      "src": "/api/(.*)",
+      "dest": "https://YOUR-RENDER-SERVICE.onrender.com/api/$1"
+    }
+    ,
+    {
+      "handle": "filesystem"
+    },
+    {
+      "src": "/",
+      "dest": "/static/index.html"
+    },
+    {
       "src": "/(.*)",
-      "dest": "server.py"
+      "dest": "/$1"
     }
-  ],
-  "functions": {
-    "server.py": {
-      "maxDuration": 60,
-      "memory": 3008
-    }
-  }
+  ]
 }
