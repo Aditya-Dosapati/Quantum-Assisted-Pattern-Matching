@@ -280,7 +280,21 @@ $('#analyzeBtn').addEventListener('click', async () => {
 
   try {
     const res = await fetch('/api/analyze', { method: 'POST', body: form });
-    const data = await res.json();
+    const raw = await res.text();
+    let data = null;
+    if (raw) {
+      try {
+        data = JSON.parse(raw);
+      } catch (parseErr) {
+        if (!res.ok) {
+          throw new Error('API error ' + res.status + ': ' + raw.slice(0, 220));
+        }
+        throw new Error('Invalid JSON from server.');
+      }
+    }
+    if (!data) {
+      throw new Error('Empty response from server (status ' + res.status + ').');
+    }
     if (data.error) {
       showErrorCard(data);
       showToast(data.error, 'error');
