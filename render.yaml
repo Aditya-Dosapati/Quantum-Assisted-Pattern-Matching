@@ -14,3 +14,5 @@ services:
         value: yolov8n.pt
       - key: LIGHTWEIGHT_MODE
         value: "true"
+      - key: QUANTUM_FAST_MODE
+        value: "true"

@@ -1,8 +1,11 @@
 """Grover's algorithm components: oracle, diffuser, and search runner."""
 
+import os
+import functools
 import numpy as np
 from qiskit import QuantumCircuit, transpile
 from qiskit_aer import Aer
+from qiskit.quantum_info import Statevector
 
 
 def grover_oracle(qc, marked_state):
@@ -32,6 +35,21 @@ def diffuser(qc, n):
     qc.h(range(n))
 
 
+@functools.lru_cache(maxsize=256)
+def _build_grover_circuit(n_candidates, best_classical):
+    """Build the Grover circuit once for a given search space and marked index."""
+    n_qubits = max(1, int(np.ceil(np.log2(n_candidates))))
+    marked_state = format(best_classical, f"0{n_qubits}b")
+
+    qc = QuantumCircuit(n_qubits)
+    qc.h(range(n_qubits))
+    iterations = max(1, int(np.floor((np.pi / 4) * np.sqrt(n_candidates))))
+    for _ in range(iterations):
+        grover_oracle(qc, marked_state)
+        diffuser(qc, n_qubits)
+    return qc, n_qubits, marked_state, iterations
+
+
 def run_grover_search(n_candidates, best_classical, shots=1024):
     """
     Build and execute a Grover circuit targeting the best classical candidate.
@@ -48,21 +66,28 @@ def run_grover_search(n_candidates, best_classical, shots=1024):
     marked_state : str
     iterations : int
     """
-    n_qubits = max(1, int(np.ceil(np.log2(n_candidates))))
-    marked_state = format(best_classical, f"0{n_qubits}b")
+    qc_base, n_qubits, marked_state, iterations = _build_grover_circuit(n_candidates, best_classical)
+    fast_mode = os.getenv("QUANTUM_FAST_MODE", "false").lower() in {"1", "true", "yes", "on"}
 
-    qc = QuantumCircuit(n_qubits)
-    qc.h(range(n_qubits))
-    # Use actual candidate count so iterations reflect each run's search space.
-    iterations = max(1, int(np.floor((np.pi / 4) * np.sqrt(n_candidates))))
-    for _ in range(iterations):
-        grover_oracle(qc, marked_state)
-        diffuser(qc, n_qubits)
-    qc.measure_all()
-
-    backend = Aer.get_backend("qasm_simulator")
-    result = backend.run(transpile(qc, backend), shots=shots).result()
-    counts = result.get_counts()
+    if fast_mode and n_qubits <= 8:
+        # Fast path for deployments: use exact statevector probabilities instead of qasm transpilation.
+        sv = Statevector.from_instruction(qc_base)
+        probs = sv.probabilities_dict()
+        counts = {}
+        for state, prob in probs.items():
+            cnt = int(round(float(prob) * shots))
+            if cnt > 0:
+                counts[state] = cnt
+        if not counts:
+            counts[format(best_classical, f"0{n_qubits}b")] = shots
+        qc = qc_base.copy()
+        qc.measure_all()
+    else:
+        qc = qc_base.copy()
+        qc.measure_all()
+        backend = Aer.get_backend("qasm_simulator")
+        result = backend.run(transpile(qc, backend), shots=shots).result()
+        counts = result.get_counts()
 
     best_state = max(counts, key=counts.get)
     grover_index = int(best_state, 2)
