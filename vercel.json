@@ -12,12 +12,15 @@
       "dest": "https://quantum-accelerated-pattern-matching.onrender.com/api/$1"
     },
     {
+      "handle": "filesystem"
+    },
+    {
       "src": "/",
       "dest": "/static/index.html"
     },
     {
       "src": "/(.*)",
-      "dest": "/static/$1"
+      "dest": "/static/index.html"
     }
   ]
 }
