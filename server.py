@@ -36,6 +36,7 @@ from quantum import run_grover_search
 import time
 
 _STATIC_DIR = os.path.join(_BASE_DIR, "static")
+LIGHTWEIGHT_MODE = os.getenv("LIGHTWEIGHT_MODE", "false").lower() in {"1", "true", "yes", "on"}
 MAX_SCENE_WIDTH = 960
 MAX_CANDIDATES = 12
 MAX_PREFILTER_CANDIDATES = 28
@@ -48,10 +49,18 @@ TARGET_LABEL_CACHE_SIZE = 64
 ANALYSIS_CACHE_SIZE = 20
 FORCE_SINGLE_MATCH = False
 TEMPLATE_MATCH_SYMBOL_THRESHOLD = 0.50
-RENDER_CIRCUIT_CHART = True
-RENDER_SERVER_CHARTS = True
+RENDER_CIRCUIT_CHART = not LIGHTWEIGHT_MODE
+RENDER_SERVER_CHARTS = not LIGHTWEIGHT_MODE
 ENABLE_TARGET_YOLO_LABEL = False
 STRICT_ABSENCE_MODE = True
+
+if LIGHTWEIGHT_MODE:
+    # Keep request latency and memory bounded on low-resource deployments.
+    MAX_SCENE_WIDTH = 768
+    MAX_CANDIDATES = 8
+    MAX_PREFILTER_CANDIDATES = 18
+    GRID_MAX_CANDIDATES = 24
+    GRID_MAX_PREFILTER_CANDIDATES = 36
 
 
 _target_feat_cache: OrderedDict[str, np.ndarray] = OrderedDict()
@@ -851,10 +860,19 @@ async def analyze(
 
     # --- Grover search ---
     t_quantum_start = time.time()
-    shots = int(max(64, min(128, n_candidates * 8)))
-    grover_index, counts, qc, n_qubits, marked_state, iterations = run_grover_search(
-        n_candidates, best_classical, shots=shots
-    )
+    shots = int(max(32, min(96 if LIGHTWEIGHT_MODE else 128, n_candidates * (4 if LIGHTWEIGHT_MODE else 8))))
+    try:
+        grover_index, counts, qc, n_qubits, marked_state, iterations = run_grover_search(
+            n_candidates, best_classical, shots=shots
+        )
+    except Exception as exc:
+        print(f"[WARN] Grover execution failed, using classical fallback: {exc}")
+        n_qubits = max(1, int(np.ceil(np.log2(n_candidates))))
+        marked_state = format(best_classical, f"0{n_qubits}b")
+        grover_index = best_classical
+        iterations = 0
+        counts = {marked_state: shots}
+        qc = None
     t_quantum_end = time.time()
 
     # --- Edge & color similarity for best match ---
@@ -869,7 +887,7 @@ async def analyze(
 
     # --- Quantum circuit diagram (optional; expensive) ---
     circuit_b64 = None
-    if RENDER_CIRCUIT_CHART:
+    if RENDER_CIRCUIT_CHART and qc is not None:
         try:
             fig_qc, ax_qc = plt.subplots(figsize=(max(8, n_qubits * 2), max(3, n_qubits * 0.8)))
             fig_qc.patch.set_facecolor('none')
