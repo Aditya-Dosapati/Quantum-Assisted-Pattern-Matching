@@ -1,13 +1,15 @@
 {
   "version": 2,
+  "builds": [
+    {
+      "src": "static/**/*",
+      "use": "@vercel/static"
+    }
+  ],
   "routes": [
     {
       "src": "/api/(.*)",
       "dest": "https://quantum-accelerated-pattern-matching.onrender.com/api/$1"
-    }
-    ,
-    {
-      "handle": "filesystem"
     },
     {
       "src": "/",
@@ -15,7 +17,7 @@
     },
     {
       "src": "/(.*)",
-      "dest": "/$1"
+      "dest": "/static/$1"
     }
   ]
 }
