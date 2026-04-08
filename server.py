@@ -45,13 +45,14 @@ SCENE_BASELINE_SIZE = 256
 TARGET_CACHE_SIZE = 32
 SCENE_FEAT_CACHE_SIZE = 16
 TARGET_LABEL_CACHE_SIZE = 64
-ANALYSIS_CACHE_SIZE = 8
-FORCE_SINGLE_MATCH = True
+ANALYSIS_CACHE_SIZE = 20
+FORCE_SINGLE_MATCH = False
 TEMPLATE_MATCH_SYMBOL_THRESHOLD = 0.50
 RENDER_CIRCUIT_CHART = True
 RENDER_SERVER_CHARTS = True
 ENABLE_TARGET_YOLO_LABEL = False
-GROVER_SHOTS = 128
+STRICT_ABSENCE_MODE = True
+
 
 _target_feat_cache: OrderedDict[str, np.ndarray] = OrderedDict()
 _scene_feat_cache: OrderedDict[str, np.ndarray] = OrderedDict()
@@ -62,7 +63,7 @@ _noise_gray_cache: dict[tuple[int, int, int], tuple[np.ndarray, np.ndarray]] = {
 app = FastAPI(title="Quantum Pattern Matching")
 
 # Add gzip compression middleware
-app.add_middleware(GZipMiddleware, minimum_size=500)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # Serve static files
 app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
@@ -315,6 +316,85 @@ def _template_symbol_candidate(scene_img: np.ndarray, target_img: np.ndarray):
     return (x1, y1, x2, y2, crop), float(max_val)
 
 
+def _intersection_over_union(box_a: tuple[int, int, int, int], box_b: tuple[int, int, int, int]) -> float:
+    """Compute IoU between two XYXY boxes."""
+    ax1, ay1, ax2, ay2 = box_a
+    bx1, by1, bx2, by2 = box_b
+
+    ix1, iy1 = max(ax1, bx1), max(ay1, by1)
+    ix2, iy2 = min(ax2, bx2), min(ay2, by2)
+    iw = max(0, ix2 - ix1)
+    ih = max(0, iy2 - iy1)
+    inter = float(iw * ih)
+
+    area_a = float(max(0, ax2 - ax1) * max(0, ay2 - ay1))
+    area_b = float(max(0, bx2 - bx1) * max(0, by2 - by1))
+    union = area_a + area_b - inter
+    if union <= 1e-8:
+        return 0.0
+    return inter / union
+
+
+def _intersection_over_smaller_area(box_a: tuple[int, int, int, int], box_b: tuple[int, int, int, int]) -> float:
+    """Compute overlap fraction relative to the smaller box area."""
+    ax1, ay1, ax2, ay2 = box_a
+    bx1, by1, bx2, by2 = box_b
+
+    ix1, iy1 = max(ax1, bx1), max(ay1, by1)
+    ix2, iy2 = min(ax2, bx2), min(ay2, by2)
+    iw = max(0, ix2 - ix1)
+    ih = max(0, iy2 - iy1)
+    inter = float(iw * ih)
+
+    area_a = float(max(0, ax2 - ax1) * max(0, ay2 - ay1))
+    area_b = float(max(0, bx2 - bx1) * max(0, by2 - by1))
+    smaller = min(area_a, area_b)
+    if smaller <= 1e-8:
+        return 0.0
+    return inter / smaller
+
+
+def _is_duplicate_location(box_a: tuple[int, int, int, int], box_b: tuple[int, int, int, int]) -> bool:
+    """Decide whether two boxes represent the same physical object location."""
+    iou = _intersection_over_union(box_a, box_b)
+    overlap_small = _intersection_over_smaller_area(box_a, box_b)
+
+    ax1, ay1, ax2, ay2 = box_a
+    bx1, by1, bx2, by2 = box_b
+    acx, acy = (ax1 + ax2) * 0.5, (ay1 + ay2) * 0.5
+    bcx, bcy = (bx1 + bx2) * 0.5, (by1 + by2) * 0.5
+    center_dist = float(np.hypot(acx - bcx, acy - bcy))
+
+    area_a = float(max(0, ax2 - ax1) * max(0, ay2 - ay1))
+    area_b = float(max(0, bx2 - bx1) * max(0, by2 - by1))
+    size_ratio = min(area_a, area_b) / (max(area_a, area_b) + 1e-8)
+    norm_scale = max(1.0, 0.5 * (np.sqrt(area_a) + np.sqrt(area_b)))
+    near_center = (center_dist / norm_scale) <= 0.36
+
+    if iou >= 0.50:
+        return True
+    if overlap_small >= 0.78:
+        return True
+    if iou >= 0.28 and near_center and size_ratio >= 0.55:
+        return True
+    return False
+
+
+def _dedupe_matched_indices(candidates, similarity_scores, matched_indices):
+    """Keep highest-score box per location to avoid duplicate hits for one object."""
+    if len(matched_indices) <= 1:
+        return matched_indices
+
+    ranked = sorted(matched_indices, key=lambda i: similarity_scores[i], reverse=True)
+    kept = []
+    for idx in ranked:
+        box = candidates[idx][:4]
+        duplicate = any(_is_duplicate_location(box, candidates[j][:4]) for j in kept)
+        if not duplicate:
+            kept.append(idx)
+    return kept
+
+
 def _collect_yolo_candidates(scene_img: np.ndarray):
     """Run YOLO once and convert detections to candidate tuple format."""
     with torch.inference_mode():
@@ -408,15 +488,14 @@ async def analyze(
     # --- Read images ---
     scene_bytes = await scene.read()
     target_bytes = await target.read()
-    scene_key = _target_hash(scene_bytes)
-    target_key = _target_hash(target_bytes)
-    analysis_key = (
-        f"{scene_key}:{target_key}:"
-        f"charts={int(RENDER_SERVER_CHARTS)}:circuit={int(RENDER_CIRCUIT_CHART)}:shots={GROVER_SHOTS}"
-    )
+    scene_md5 = hashlib.md5(scene_bytes).hexdigest()
+    target_md5 = hashlib.md5(target_bytes).hexdigest()
+    analysis_key = f"{scene_md5}:{target_md5}"
     cached_payload = _cache_get_analysis(analysis_key)
     if cached_payload is not None:
         return JSONResponse(content=cached_payload)
+    scene_key = _target_hash(scene_bytes)
+    target_key = _target_hash(target_bytes)
     scene_img = np.array(Image.open(io.BytesIO(scene_bytes)).convert("RGB"))
     target_img = np.array(Image.open(io.BytesIO(target_bytes)).convert("RGB"))
 
@@ -589,7 +668,7 @@ async def analyze(
 
     best_classical = int(np.argmax(similarity_scores))
     best_score = float(similarity_scores[best_classical])
-    best_label = candidate_labels[best_classical] if best_classical < len(candidate_labels) else target_object_label
+    best_label = "Matched Pattern"
     best_clip_score = float(clip_scores[best_classical])
     best_symbol_score = float(symbol_scores[best_classical]) if symbol_scores is not None else 0.0
     t_similarity_end = time.time()
@@ -614,68 +693,104 @@ async def analyze(
         score_gap = best_score
 
     # --- Pattern-absence detection ---
+    # For repeated grid patterns, use looser rejection thresholds since identical icons
+    # naturally produce high cross-similarity and tight score clustering.
+    is_repeat_grid_scene = "Grid" in detection_method and n_candidates >= 10
+    
     pattern_absent = False
     rejection_reasons = []
 
-    if noise_margin < 0.035:
+    # Adjust thresholds based on scene type
+    noise_margin_threshold = 0.002 if is_repeat_grid_scene else 0.004
+    cross_margin_threshold = -0.02 if is_repeat_grid_scene else -0.01
+    baseline_gap_threshold = 0.001 if is_repeat_grid_scene else 0.002
+    separation_threshold = 0.8 if is_repeat_grid_scene else 1.2
+    score_range_threshold = 0.012 if is_repeat_grid_scene else 0.006
+    min_best_score_threshold = 0.64 if is_repeat_grid_scene else 0.67
+    min_score_gap_threshold = 0.010 if is_repeat_grid_scene else 0.014
+    
+    if noise_margin < noise_margin_threshold:
         pattern_absent = True
         rejection_reasons.append(
             f"Best CLIP score ({best_clip_score:.4f}) barely above noise floor "
-            f"({noise_floor:.4f}), margin: {noise_margin:.4f} < 0.035"
+            f"({noise_floor:.4f}), margin: {noise_margin:.4f} < {noise_margin_threshold}"
         )
-    if cross_margin < -0.005 and len(cross_sims) > 0 and noise_margin < 0.06:
+    if cross_margin < cross_margin_threshold and len(cross_sims) > 0 and noise_margin < 0.06:
         pattern_absent = True
         rejection_reasons.append(
             f"Best CLIP score ({best_clip_score:.4f}) not above scene self-similarity "
-            f"({avg_cross_similarity:.4f}), margin: {cross_margin:.4f} < -0.005"
+            f"({avg_cross_similarity:.4f}), margin: {cross_margin:.4f} < {cross_margin_threshold}"
         )
-    if baseline_gap < 0.008 and noise_margin < 0.06:
+    if baseline_gap < baseline_gap_threshold and noise_margin < 0.04:
         pattern_absent = True
         rejection_reasons.append(
             f"No localization — best candidate CLIP ({best_clip_score:.4f}) ≈ full scene "
-            f"({scene_baseline:.4f}), gap: {baseline_gap:.4f} < 0.008"
+            f"({scene_baseline:.4f}), gap: {baseline_gap:.4f} < {baseline_gap_threshold}"
         )
-    if len(similarity_scores) > 2 and separation < 1.2 and noise_margin < 0.08:
+    if len(similarity_scores) > 2 and separation < separation_threshold and noise_margin < 0.05:
         pattern_absent = True
         rejection_reasons.append(
-            f"No standout candidate (z-score: {separation:.2f} < 1.2) "
-            f"and weak noise margin ({noise_margin:.4f} < 0.08)"
+            f"No standout candidate (z-score: {separation:.2f} < {separation_threshold}) "
+            f"and weak noise margin ({noise_margin:.4f} < 0.05)"
         )
     if len(similarity_scores) > 2:
         score_range = max(similarity_scores) - min(similarity_scores)
-        if score_range < 0.01 and noise_margin < 0.06:
+        if score_range < score_range_threshold and noise_margin < 0.04:
             pattern_absent = True
             rejection_reasons.append(
-                f"All candidates nearly identical scores (range: {score_range:.4f} < 0.01), "
-                f"weak noise margin ({noise_margin:.4f} < 0.06)"
+                f"All candidates nearly identical scores (range: {score_range:.4f} < {score_range_threshold}), "
+                f"weak noise margin ({noise_margin:.4f} < 0.04)"
             )
+    if best_score < min_best_score_threshold:
+        pattern_absent = True
+        rejection_reasons.append(
+            f"Best composite score too low ({best_score:.4f} < {min_best_score_threshold})"
+        )
+    if score_gap < min_score_gap_threshold:
+        pattern_absent = True
+        rejection_reasons.append(
+            f"Best-vs-rest gap too small ({score_gap:.4f} < {min_score_gap_threshold})"
+        )
 
-    # Repeated icon grids naturally have high cross-similarity; recover likely true positives.
-    if pattern_absent and "Grid" in detection_method and best_score >= 0.62 and noise_margin >= 0.03 and score_gap >= 0.005:
-        pattern_absent = False
+    # Repeated icon grids naturally have high cross-similarity and tight score clustering.
+    # Keep classic behavior for normal scenes; only mildly relax for repeated-grid scenes.
+    if pattern_absent and "Grid" in detection_method:
+        if is_repeat_grid_scene:
+            if best_score >= 0.62 and noise_margin >= 0.02 and score_gap >= 0.003:
+                pattern_absent = False
+        elif best_score >= 0.62 and noise_margin >= 0.03 and score_gap >= 0.005:
+            pattern_absent = False
 
-    if pattern_absent:
-        # For dense symbol/grid scenes, strict rejection can create false negatives.
-        # If candidates exist, continue with best candidate fallback.
-        if "Grid" not in detection_method and "Template Symbol" not in detection_method:
-            return {
-                "error": "Pattern NOT found in the scene.",
-                "rejection_reasons": rejection_reasons,
-                "diagnostics": {
-                    "best_score": round(best_score, 4),
-                    "noise_floor": round(noise_floor, 4),
-                    "noise_margin": round(noise_margin, 4),
-                    "avg_cross_similarity": round(avg_cross_similarity, 4),
-                    "scene_baseline": round(scene_baseline, 4),
-                },
-            }
-        rejection_reasons.append("Fallback enabled for grid-symbol scene: selecting best candidate instead of rejecting.")
+    if pattern_absent and STRICT_ABSENCE_MODE:
+        return {
+            "error": "Pattern NOT found in the scene.",
+            "rejection_reasons": rejection_reasons,
+            "diagnostics": {
+                "best_score": round(best_score, 4),
+                "score_gap": round(score_gap, 4),
+                "noise_floor": round(noise_floor, 4),
+                "noise_margin": round(noise_margin, 4),
+                "avg_cross_similarity": round(avg_cross_similarity, 4),
+                "scene_baseline": round(scene_baseline, 4),
+            },
+        }
 
     # --- Multi-match selection ---
-    # Repeated icon sheets produce very close scores across many tiles; use stricter selection.
+    # For repeated patterns (same pattern at multiple locations), detect all occurrences.
     is_repeated_grid = ("Grid" in detection_method and n_candidates >= 10)
-    diff_threshold_pct = 0.15 if is_repeated_grid else 0.5
+    
+    # Keep single-object precision strong, while allowing moderate spread for repeated grids.
+    if is_repeated_grid:
+        diff_threshold_pct = 2.2
+    else:
+        diff_threshold_pct = 1.2
+
     diff_threshold = diff_threshold_pct / 100.0
+    if is_repeated_grid:
+        secondary_floor = max(best_score - (diff_threshold * 1.6), best_score * 0.80)
+    else:
+        secondary_floor = max(best_score - (diff_threshold * 1.4), best_score * 0.82)
+
     ranked_by_score = sorted(range(len(similarity_scores)), key=lambda i: similarity_scores[i], reverse=True)
     best_idx = ranked_by_score[0]
     second_idx = ranked_by_score[1] if len(ranked_by_score) > 1 else None
@@ -687,15 +802,20 @@ async def analyze(
         matched_indices = [best_idx]
     else:
         if top_gap_pct > diff_threshold_pct:
+            # Clear winner - single match
             matched_indices = [best_idx]
         else:
+            # Multiple candidates close to top score - include them as multiple matches
             matched_indices = [
                 i for i, score in enumerate(similarity_scores)
-                if ((best_score - score) * 100.0) <= diff_threshold_pct
+                if ((best_score - score) * 100.0) <= diff_threshold_pct and score >= secondary_floor
             ]
 
-        if is_repeated_grid and matched_indices:
-            matched_indices = [best_idx]
+        # Cap very dense repeated-grid outputs to avoid noisy over-highlighting.
+        if is_repeated_grid and len(matched_indices) > 12:
+            matched_indices = sorted(matched_indices, key=lambda i: similarity_scores[i], reverse=True)[:12]
+
+    matched_indices = _dedupe_matched_indices(candidates, similarity_scores, matched_indices)
 
     match_threshold = best_score - diff_threshold
     if not matched_indices:
@@ -703,7 +823,7 @@ async def analyze(
 
     # --- Grover search ---
     t_quantum_start = time.time()
-    shots = GROVER_SHOTS
+    shots = int(max(64, min(128, n_candidates * 8)))
     grover_index, counts, qc, n_qubits, marked_state, iterations = run_grover_search(
         n_candidates, best_classical, shots=shots
     )
@@ -724,8 +844,13 @@ async def analyze(
     if RENDER_CIRCUIT_CHART:
         try:
             fig_qc, ax_qc = plt.subplots(figsize=(max(8, n_qubits * 2), max(3, n_qubits * 0.8)))
+            fig_qc.patch.set_facecolor('none')
+            ax_qc.set_facecolor('none')
             qc.draw('mpl', ax=ax_qc)
-            ax_qc.set_title("Grover's Circuit", fontsize=12, fontweight='bold', pad=10)
+            ax_qc.set_title("Grover's Circuit", fontsize=12, fontweight='bold', pad=10, color='white')
+            ax_qc.tick_params(colors='white')
+            for spine in ax_qc.spines.values():
+                spine.set_color('white')
             circuit_b64 = _fig_to_b64(fig_qc)
             plt.close(fig_qc)
         except Exception as exc:
@@ -760,7 +885,7 @@ async def analyze(
         candidate_thumbs.append({
             "rank": rank + 1,
             "index": idx,
-            "label": candidate_labels[idx] if idx < len(candidate_labels) else target_object_label,
+            "label": "Matched Pattern",
             "score": round(similarity_scores[idx], 4),
             "image": _img_to_b64(thumb, fmt="png"),
         })
@@ -777,8 +902,7 @@ async def analyze(
         box_color = (0, 255, 255) if is_grover_pick else (0, 220, 120)
         thickness = 4 if is_grover_pick else 3
         cv2.rectangle(output_img, (x1, y1), (x2, y2), box_color, thickness)
-        label = candidate_labels[idx] if idx < len(candidate_labels) else target_object_label
-        text = str(label).strip() if str(label).strip() else "object"
+        text = "Matched Pattern"
         (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.72, 2)
         pad = 6
         by2 = max(th + 2 * pad, y1)
@@ -795,6 +919,8 @@ async def analyze(
     if RENDER_SERVER_CHARTS:
         # Chart 1: Grover measurement histogram
         fig1, ax1 = plt.subplots(figsize=(8, 4))
+        fig1.patch.set_facecolor('none')
+        ax1.set_facecolor('none')
         states = list(counts.keys())
         count_vals = list(counts.values())
         colors_grover = [
@@ -805,13 +931,16 @@ async def analyze(
         for bar, val in zip(bars, count_vals):
             if val > max(count_vals) * 0.05:
                 ax1.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + max(count_vals) * 0.02,
-                         str(val), ha='center', va='bottom', fontsize=9, fontweight='bold', color='#1e293b')
-        ax1.set_xlabel("Quantum State", fontsize=11, fontweight='bold')
-        ax1.set_ylabel("Measurement Counts", fontsize=11, fontweight='bold')
-        ax1.set_title("Grover's Algorithm — Measurement Distribution", fontsize=13, fontweight='bold', pad=12)
+                         str(val), ha='center', va='bottom', fontsize=9, fontweight='bold', color='white')
+        ax1.set_xlabel("Quantum State", fontsize=11, fontweight='bold', color='white')
+        ax1.set_ylabel("Measurement Counts", fontsize=11, fontweight='bold', color='white')
+        ax1.set_title("Grover's Algorithm — Measurement Distribution", fontsize=13, fontweight='bold', pad=12, color='white')
         ax1.spines['top'].set_visible(False)
         ax1.spines['right'].set_visible(False)
-        ax1.tick_params(axis='x', rotation=45 if len(states) > 8 else 0)
+        ax1.tick_params(axis='x', rotation=45 if len(states) > 8 else 0, colors='white')
+        ax1.tick_params(axis='y', colors='white')
+        ax1.spines['left'].set_color('white')
+        ax1.spines['bottom'].set_color('white')
         ax1.grid(axis='y', alpha=0.3, linestyle='--')
         fig1.tight_layout()
         chart1_b64 = _fig_to_b64(fig1)
@@ -819,6 +948,8 @@ async def analyze(
 
         # Chart 2: Candidate similarity scores
         fig2, ax2 = plt.subplots(figsize=(8, 4))
+        fig2.patch.set_facecolor('none')
+        ax2.set_facecolor('none')
         cand_labels = [f"C{i}" for i in range(len(similarity_scores))]
         colors_sim = [
             '#10b981' if i in matched_indices
@@ -829,18 +960,27 @@ async def analyze(
         bars2 = ax2.barh(cand_labels, similarity_scores, color=colors_sim, edgecolor='white', linewidth=0.8)
         for bar, score in zip(bars2, similarity_scores):
             ax2.text(bar.get_width() + 0.005, bar.get_y() + bar.get_height() / 2,
-                     f"{score:.3f}", ha='left', va='center', fontsize=9, fontweight='bold', color='#1e293b')
+                     f"{score:.3f}", ha='left', va='center', fontsize=9, fontweight='bold', color='white')
         ax2.axvline(x=noise_floor, color='#94a3b8', linestyle=':', linewidth=1.2,
                     label=f'Noise Floor ({noise_floor:.3f})')
         ax2.axvline(x=match_threshold, color='#ef4444', linestyle='--', linewidth=1.5,
                     label=f'Min Match ({match_threshold:.3f})')
-        ax2.set_xlabel("Similarity Score", fontsize=11, fontweight='bold')
-        ax2.set_ylabel("Candidate Region", fontsize=11, fontweight='bold')
-        ax2.set_title("Composite Similarity Scores per Candidate Region", fontsize=13, fontweight='bold', pad=12)
+        ax2.set_xlabel("Similarity Score", fontsize=11, fontweight='bold', color='white')
+        ax2.set_ylabel("Candidate Region", fontsize=11, fontweight='bold', color='white')
+        ax2.set_title("Composite Similarity Scores per Candidate Region", fontsize=13, fontweight='bold', pad=12, color='white')
         ax2.set_xlim(0, min(1.05, max(similarity_scores) + 0.08))
         ax2.spines['top'].set_visible(False)
         ax2.spines['right'].set_visible(False)
-        ax2.legend(loc='lower right', fontsize=9)
+        ax2.tick_params(axis='x', colors='white')
+        ax2.tick_params(axis='y', colors='white')
+        ax2.spines['left'].set_color('white')
+        ax2.spines['bottom'].set_color('white')
+        legend = ax2.legend(loc='lower right', fontsize=9)
+        if legend is not None:
+            legend.get_frame().set_facecolor('none')
+            legend.get_frame().set_edgecolor('white')
+            for txt in legend.get_texts():
+                txt.set_color('white')
         ax2.grid(axis='x', alpha=0.3, linestyle='--')
         fig2.tight_layout()
         chart2_b64 = _fig_to_b64(fig2)
@@ -910,11 +1050,10 @@ async def analyze(
         "raw_candidates_detected": raw_candidates_detected,
         "n_candidates": n_candidates,
         "best_classical": best_classical,
-        "target_object_label": target_object_label,
         "best_label": best_label,
         "best_score": round(best_score, 4),
         "matched_indices": matched_indices,
-        "matched_labels": [candidate_labels[i] if i < len(candidate_labels) else target_object_label for i in matched_indices],
+        "matched_labels": ["Matched Pattern" for _ in matched_indices],
         "n_matches": len(matched_indices),
         "grover_index": grover_index,
         "n_qubits": n_qubits,

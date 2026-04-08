@@ -94,7 +94,7 @@
       return;
     }
 
-    var observer = new MutationObserver(function () {
+    window.runResultsEntranceAnimation = function () {
       if (!results.classList.contains('visible')) {
         return;
       }
@@ -123,14 +123,7 @@
           overwrite: true
         }
       );
-    });
-
-    observer.observe(results, {
-      attributes: true,
-      childList: true,
-      subtree: true,
-      attributeFilter: ['class']
-    });
+    };
   }
 
   if (document.readyState === 'loading') {

@@ -103,11 +103,6 @@ document.querySelectorAll('.nav-btn').forEach(function(btn) {
   });
 });
 
-/* ── Device Badge ─────────────────────────────── */
-fetch('/api/device').then(r => r.json()).then(d => {
-  $('#deviceBadge').textContent = d.device || 'cpu';
-}).catch(() => { $('#deviceBadge').textContent = 'cpu'; });
-
 /* ── Upload Logic ─────────────────────────────── */
 let sceneFile = null, targetFile = null;
 
@@ -132,6 +127,113 @@ setupUpload('#sceneInput',  '#sceneCard',  '#scenePreview',  f => sceneFile = f)
 setupUpload('#targetInput', '#targetCard', '#targetPreview', f => targetFile = f);
 
 function updateButton() { $('#analyzeBtn').disabled = !(sceneFile && targetFile); }
+
+function formatDiagnosticsValue(key, value) {
+  if (Array.isArray(value) && key === 'all_scores') {
+    var total = value.length;
+    var previewCount = Math.min(total, 40);
+    var preview = value.slice(0, previewCount).map(function(s) {
+      return Number(s).toFixed(4);
+    }).join(', ');
+    return preview + (total > previewCount ? ' ... (+' + (total - previewCount) + ' more)' : '');
+  }
+  if (Array.isArray(value)) {
+    var compact = value.slice(0, 12).map(function(v) {
+      return typeof v === 'number' ? Number(v).toFixed(4) : String(v);
+    }).join(', ');
+    return compact + (value.length > 12 ? ' ...' : '');
+  }
+  return typeof value === 'number' ? Number(value).toFixed(4) : String(value);
+}
+
+function buildTopStatesHtml(topStates) {
+  if (!topStates || !topStates.length) {
+    return '<p style="color:var(--muted);font-size:.85rem;">No measured states available.</p>';
+  }
+  var total = 0;
+  for (var t = 0; t < topStates.length; t++) {
+    total += Number(topStates[t].count || 0);
+  }
+
+  var stateCards = '';
+  for (var i = 0; i < topStates.length; i++) {
+    var st = topStates[i];
+    var count = Number(st.count || 0);
+    var pct = total > 0 ? ((count / total) * 100).toFixed(1) : '0.0';
+    stateCards +=
+      '<div class="qstate-item">' +
+        '<div class="qstate-state"><code>|' + st.state + '\u27E9</code></div>' +
+        '<div class="qstate-count">' + count + ' counts</div>' +
+        '<div class="qstate-track"><div class="qstate-fill" style="width:' + pct + '%"></div></div>' +
+      '</div>';
+  }
+
+  return '<div class="qstate-grid">' + stateCards + '</div>';
+}
+
+function buildDiagnosticsHtml(diag) {
+  if (!diag) {
+    return '<p style="color:var(--muted);font-size:.85rem;">Diagnostics unavailable.</p>';
+  }
+  var diagHtml = '';
+  var keys = Object.keys(diag);
+  for (var i = 0; i < keys.length; i++) {
+    var key = keys[i];
+    var label = key.replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+    var value = diag[key];
+
+    if (key === 'all_scores' && Array.isArray(value)) {
+      var total = value.length;
+      var chips = value.slice(0, 24).map(function(v) {
+        var txt = typeof v === 'number' ? Number(v).toFixed(4) : String(v);
+        return '<span class="qi-chip">' + txt + '</span>';
+      }).join('');
+      var meta = '<span class="qi-meta">Showing ' + Math.min(total, 24) + ' of ' + total + ' scores</span>';
+      diagHtml +=
+        '<div class="qi-item qi-item-wide">' +
+          '<div class="qi-item-head"><span class="qi-label">' + label + '</span>' + meta + '</div>' +
+          '<div class="qi-score-list">' + chips + '</div>' +
+        '</div>';
+      continue;
+    }
+
+    var valueText = formatDiagnosticsValue(key, value);
+    diagHtml += '<div class="qi-item"><span class="qi-label">' + label + '</span><span class="qi-value">' + valueText + '</span></div>';
+  }
+  return '<div class="qi-grid">' + diagHtml + '</div>';
+}
+
+function initAccordions() {
+  var headers = document.querySelectorAll('.accordion-header[data-accordion]');
+  headers.forEach(function(header) {
+    header.addEventListener('click', function() {
+      var wrapper = header.parentElement;
+      if (!wrapper) return;
+
+      var open = wrapper.classList.toggle('open');
+      var bodyInner = wrapper.querySelector('.accordion-body-inner');
+      if (!open || !bodyInner || bodyInner.dataset.rendered === '1') {
+        return;
+      }
+
+      var kind = header.getAttribute('data-accordion');
+      requestAnimationFrame(function() {
+        if (kind === 'quantum-states') {
+          var topStates = [];
+          try { topStates = JSON.parse(bodyInner.dataset.topStates || '[]'); } catch (e) { topStates = []; }
+          bodyInner.innerHTML =
+            '<p class="accordion-subtitle">Top Measured States</p>' +
+            buildTopStatesHtml(topStates);
+        } else if (kind === 'diagnostics') {
+          var diag = {};
+          try { diag = JSON.parse(bodyInner.dataset.diag || '{}'); } catch (e) { diag = {}; }
+          bodyInner.innerHTML = buildDiagnosticsHtml(diag);
+        }
+        bodyInner.dataset.rendered = '1';
+      });
+    });
+  });
+}
 
 /* ── Loading Steps ─────────────────────────────── */
 var loadingInterval = null;
@@ -466,44 +568,26 @@ function renderResults(data) {
       '<div class="quantum-badge"><div class="quantum-value">' + qi.shots + '</div><div class="quantum-label">Shots</div></div>' +
     '</div>';
 
-  // Accordions
-  var diag = data.diagnostics;
-  var topStatesHtml = '';
-  for (var si = 0; si < qi.top_states.length; si++) {
-    var st = qi.top_states[si];
-    topStatesHtml += '<code>|' + st.state + '\u27E9</code>: ' + st.count + ' counts';
-    if (si < qi.top_states.length - 1) topStatesHtml += '<br/>';
-  }
-  var diagHtml = '';
-  var diagKeys = Object.keys(diag);
-  for (var di = 0; di < diagKeys.length; di++) {
-    var dk = diagKeys[di];
-    var dv = diag[dk];
-    if (dk === 'all_scores') {
-      diagHtml += '<div class="qi-item"><span class="qi-label">' + dk + '</span><span class="qi-value">' + dv.map(function(s) { return s.toFixed(4); }).join(', ') + '</span></div>';
-    } else {
-      var dlabel = dk.replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
-      diagHtml += '<div class="qi-item"><span class="qi-label">' + dlabel + '</span><span class="qi-value">' + (typeof dv === 'number' ? dv.toFixed(4) : dv) + '</span></div>';
-    }
-  }
+  // Accordions (lazy-rendered on first open to avoid jank)
+  var diag = data.diagnostics || {};
+  var topStatesEncoded = JSON.stringify(qi.top_states || []).replace(/"/g, '&quot;');
+  var diagEncoded = JSON.stringify(diag).replace(/"/g, '&quot;');
   $('#accordions').innerHTML =
     '<div class="accordion">' +
-      '<div class="accordion-header" onclick="this.parentElement.classList.toggle(\'open\')">' +
+      '<div class="accordion-header" data-accordion="quantum-states">' +
         '<span>\uD83E\uDDEA Quantum State Details</span><span class="accordion-arrow">\u25BC</span>' +
       '</div>' +
-      '<div class="accordion-body"><div class="accordion-body-inner">' +
-        '<p style="font-weight:600;margin-bottom:10px;">Top Measured States</p>' +
-        '<p style="font-family:\'JetBrains Mono\',monospace;font-size:.85rem;color:var(--muted);">' + topStatesHtml + '</p>' +
+      '<div class="accordion-body"><div class="accordion-body-inner" data-top-states="' + topStatesEncoded + '"></div>' +
       '</div></div>' +
     '</div>' +
     '<div class="accordion">' +
-      '<div class="accordion-header" onclick="this.parentElement.classList.toggle(\'open\')">' +
+      '<div class="accordion-header" data-accordion="diagnostics">' +
         '<span>\uD83D\uDD0D Pattern Diagnostics</span><span class="accordion-arrow">\u25BC</span>' +
       '</div>' +
-      '<div class="accordion-body"><div class="accordion-body-inner">' +
-        '<div class="qi-grid">' + diagHtml + '</div>' +
-      '</div></div>' +
+      '<div class="accordion-body"><div class="accordion-body-inner" data-diag="' + diagEncoded + '"></div></div>' +
     '</div>';
+
+  initAccordions();
 
   // Staggered reveal for key result blocks.
   var revealTargets = [];
@@ -529,6 +613,9 @@ function renderResults(data) {
   requestAnimationFrame(function() {
     for (var i = 0; i < revealTargets.length; i++) {
       revealTargets[i].classList.add('reveal-active');
+    }
+    if (typeof window.runResultsEntranceAnimation === 'function') {
+      window.runResultsEntranceAnimation();
     }
   });
   $('#resultsSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
