@@ -59,6 +59,9 @@ _scene_feat_cache: OrderedDict[str, np.ndarray] = OrderedDict()
 _target_label_cache: OrderedDict[str, str] = OrderedDict()
 _analysis_cache: OrderedDict[str, dict] = OrderedDict()
 _noise_gray_cache: dict[tuple[int, int, int], tuple[np.ndarray, np.ndarray]] = {}
+yolo_model = None
+clip_model = None
+clip_processor = None
 
 app = FastAPI(title="Quantum Pattern Matching")
 
@@ -68,11 +71,16 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 # Serve static files
 app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
 
-# ✅ LOAD MODELS ONCE (ADD THIS)
-print("Loading models on startup...")
-yolo_model, clip_model, clip_processor = load_models()
-clip_model.eval()
-print("Models loaded successfully.")
+def _ensure_models_loaded() -> None:
+    """Load heavy models lazily to keep startup memory and boot time low."""
+    global yolo_model, clip_model, clip_processor
+    if yolo_model is not None and clip_model is not None and clip_processor is not None:
+        return
+    print("Loading models lazily (first analysis request)...")
+    yolo_model, clip_model, clip_processor = load_models()
+    if clip_model is not None:
+        clip_model.eval()
+    print("Models loaded successfully.")
 
 
 class _NumpyEncoder(json.JSONEncoder):
@@ -98,6 +106,25 @@ def _resize_if_needed(img: np.ndarray, max_width: int) -> np.ndarray:
 
 def _clip_image_features(images: list[np.ndarray]) -> np.ndarray:
     """Extract normalized CLIP image embeddings for a list of RGB numpy images."""
+    if clip_model is None or clip_processor is None:
+        # Low-memory fallback: compact handcrafted descriptor vector.
+        descs = []
+        for img in images:
+            small = cv2.resize(img, (64, 64), interpolation=cv2.INTER_AREA)
+            hsv = cv2.cvtColor(small, cv2.COLOR_RGB2HSV)
+            hist = cv2.calcHist([hsv], [0, 1, 2], None, [8, 8, 4], [0, 180, 0, 256, 0, 256]).astype(np.float32)
+            hist = hist.flatten()
+            hist /= (np.linalg.norm(hist) + 1e-8)
+
+            gray = cv2.cvtColor(small, cv2.COLOR_RGB2GRAY)
+            edge = cv2.Canny(gray, 60, 140).astype(np.float32).flatten() / 255.0
+            edge /= (np.linalg.norm(edge) + 1e-8)
+
+            vec = np.concatenate([hist, edge]).astype(np.float32)
+            vec /= (np.linalg.norm(vec) + 1e-8)
+            descs.append(vec)
+        return np.vstack(descs)
+
     inputs = clip_processor(images=images, return_tensors="pt", padding=True)
     inputs = {k: v.to(DEVICE) for k, v in inputs.items()}
 
@@ -483,6 +510,7 @@ async def analyze(
 ):
     """Run the full analysis pipeline and return JSON results."""
     pipeline_start = time.time()
+    _ensure_models_loaded()
     
 
     # --- Read images ---
